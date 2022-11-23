@@ -4,12 +4,12 @@ from scipy import interpolate
 
 PREFIX = '/home/mallabhi/SPIEncoder/data/'
 
-def load_data(nframes=None):
+def load_data(nintens=None):
     '''Load object's size, 2D Intensity avgs. and corresponding orientations'''
     with h5py.File(PREFIX + 'sim_MS2.h5', 'r') as fptr:
-        intens = fptr['image'][:nframes]
-        orientation = fptr['quaternion'][:nframes]
-        objsize = fptr['size'][:nframes]
+        intens = fptr['image'][:nintens]
+        orientation = fptr['quaternion'][:nintens]
+        objsize = fptr['size'][:nintens]
     orientation[:,1:] *= -1.
 
     # Calculate pixel radii
@@ -59,18 +59,22 @@ def sample_down_intens(intens_input):
     intens_input_c = mask_circle(intens_input_c)
     return intens_input_c
 
-def split_data(input_intens, orientation, objsize, data_points, split_ratio):
+def split_data(input_intens, orientation, objsize, split_ratio):
     '''Splitting the data into training and validation dataset'''
-    t_intens = input_intens[:int(data_points*split_ratio),:,:]
-    t_ori = orientation[:int(data_points*split_ratio),:]
-    t_objsize = objsize[:int(data_points*split_ratio)]
-
-    v_intens = input_intens[int(data_points*split_ratio):,:,:]
-    v_ori = orientation[int(data_points*split_ratio):,:]
-    v_objsize = objsize[int(data_points*split_ratio):]
-    print('Total Training Datapoints:', len(t_ori))
-    print('Total Validation Datapoints:', len(v_ori))
-    return t_intens, t_ori, t_objsize, v_intens, v_ori, v_objsize
+    n_train = int(len(input_intens) * split_ratio)
+    print('Total Training Datapoints:', n_train)
+    print('Total Validation Datapoints:', len(input_intens) - n_train)
+    train_dict = {'input_intens': input_intens[:n_train],
+                  'orientation': orientation[:n_train],
+                  'objsize': objsize[:n_train],
+                  'train': True,
+                  'save': False}
+    valid_dict = {'input_intens': input_intens[n_train:],
+                  'orientation': orientation[n_train:],
+                  'objsize': objsize[n_train:],
+                  'train': False,
+                  'save': False}
+    return train_dict, valid_dict
 
 def sample_down_plane(input_plane):
     '''Scaled down sliced plane'''
