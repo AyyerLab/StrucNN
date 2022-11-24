@@ -1,42 +1,31 @@
-import torch 
-import torchvision
-import torch.nn as nn
-import torch.nn.functional as F
+'''Functions to load and process data before training'''
 import numpy as np
-from random import shuffle
-import os
 import h5py
 from scipy import interpolate
 
-def ave_fun(q, a,b,c):
-    '''Scaling 2D Intensitis with average of radial avgs. 
-                        of all 2D-Intensities in datatset'''
-    return a*q**(-b) + c
+PREFIX = '/home/mallabhi/StrucNN/data/'
 
-def load_data():
+def load_data(nintens=None):
     '''Load object's size, 2D Intensity avgs. and corresponding orientations'''
-    with h5py.File('/home/mallabhi/StrucNN/data/sim_MS2.h5', 'r') as f:
-        intens = f['image'][:]
-        orientation = f['quaternion'][:]
-    orien_new = np.zeros((len(orientation), 4))
-    orien_new[:,0] = orientation[:,0]
-    orien_new[:,1] = -orientation[:,1]
-    orien_new[:,2] = -orientation[:,2]
-    orien_new[:,3] = -orientation[:,3]
-    orientation = orien_new
+    with h5py.File(PREFIX + 'sim_MS2.h5', 'r') as fptr:
+        intens = fptr['image'][:nintens]
+        orientation = fptr['quaternion'][:nintens]
+    orientation[:,1:] *= -1.
 
-    '''Normalizing Intensity vals to range: 0-1'''
-    sz = intens.shape[1]
-    x0, y0 = np.indices((sz,sz))
-    x0 -= sz//2
-    y0 -= sz//2
-    rad_float = np.sqrt(x0**2 + y0**2)
-    rad_float[rad_float==0] = 1e-3
-    ave_2d = np.array([ave_fun(i,1.15e4,4,2.95e-5) for i in rad_float.ravel()]).reshape(sz,sz)
+    # Calculate pixel radii
+    ind = np.arange(intens.shape[-1]) - intens.shape[-1]//2
+    x, y = np.meshgrid(ind, ind, indexing='ij')
+    rad = np.sqrt(x**2 + y**2)
+    rad[rad==0] = 1e-4
+    # Hard coded function to get flat radial profile
+    ave_2d = 1.15e4 * rad**-4 + 2.95e-5
 
-    norm_intens = intens/ave_2d
-    input_intens = norm_intens/np.max(norm_intens) * 0.99
-    input_intens = sample_down_intens(input_intens)
+    # Normalizing Intensity vals to range: 0-1
+    norm_intens = intens / ave_2d
+    norm_intens *= 0.99 / norm_intens.max()
+
+    # Resample input intensities
+    input_intens = sample_down_intens(norm_intens)
 
     print('Data Processed.')
     return input_intens, orientation
@@ -57,7 +46,7 @@ def sample_down_intens(intens_input):
     size = intens_input.shape[1]//2
     x_orig = np.arange(-size, size+1, 1.) / size
     y_orig = np.arange(-size, size+1, 1.) / size
-    lmax =60 
+    lmax = 60
     step_pix = 3.5
     x_new = np.arange(-lmax, lmax+1, 1) / size * step_pix
     y_new = np.arange(-lmax, lmax+1, 1) / size * step_pix
@@ -80,16 +69,15 @@ def sample_down_plane(input_plane):
     x_new = np.arange(-lmax, lmax+1, 1) / lmax * frac_vox
     y_new = np.arange(-lmax, lmax+1, 1) / lmax * frac_vox
     return interpf(x_new, y_new)
-    
 
 def get_detector():
     ''''Get Detector Pixel Coordinates'''
-    with h5py.File('/home/mallabhi/SPIEncoder/data/det_vae.h5', 'r') as f:
-        qx1 = f['qx'][:].reshape(503, 503)
-        qy1 = f['qy'][:].reshape(503, 503)
-        qz1 = f['qz'][:].reshape(503, 503)
-  
-    '''Normalizing Detector qx, qy and qz coordinates'''
+    with h5py.File(PREFIX + 'det_vae.h5', 'r') as fptr:
+        qx1 = fptr['qx'][:].reshape(503, 503)
+        qy1 = fptr['qy'][:].reshape(503, 503)
+        qz1 = fptr['qz'][:].reshape(503, 503)
+
+    # Normalizing Detector qx, qy and qz coordinates
     factor = np.sqrt(qx1**2 + qy1**2 + qz1**2).max()
     qx_d = qx1/factor
     qy_d = qy1/factor
@@ -98,5 +86,3 @@ def get_detector():
     qy_ds = sample_down_plane(qy_d)
     qz_ds = sample_down_plane(qz_d)
     return qx_ds, qy_ds, qz_ds
-
-
