@@ -94,7 +94,7 @@ def sample_down_plane(input_plane):
 
 def get_detector():
     ''''Get Detector Pixel Coordinates'''
-    with h5py.File('/home/mallabhi/SPIEncoder/data/det_vae.h5', 'r') as fptr:
+    with h5py.File(PREFIX + 'det_vae.h5', 'r') as fptr:
         qx1 = fptr['qx'][:].reshape(503, 503)
         qy1 = fptr['qy'][:].reshape(503, 503)
         qz1 = fptr['qz'][:].reshape(503, 503)
