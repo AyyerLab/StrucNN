@@ -1,47 +1,34 @@
-import torch 
-import torchvision
-import torch.nn as nn
-import torch.nn.functional as F
+'''Functions to load and process data before training'''
 import numpy as np
-from random import shuffle
-import os
 import h5py
 from scipy import interpolate
 
-def ave_fun(q, a,b,c):
-    '''Scaling 2D Intensitis with average of radial avgs. 
-                        of all 2D-Intensities in datatset'''
-    return a*q**(-b) + c
+PREFIX = '/home/mallabhi/strucNN/data/'
 
-def load_data():
+def load_data(nintens=None):
     '''Load object's size, 2D Intensity avgs. and corresponding orientations'''
-    with h5py.File('/home/mallabhi/StrucNN/data/MS2_10k_subset.h5', 'r') as f:
-        intens = f['intens'][:]
-    orientation = np.load('/home/mallabhi/StrucNN/data/orient_10k_subet.npy')[:]
-    orien_new = np.zeros((len(orientation), 4))
-    orien_new[:,0] = orientation[:,0]
-    orien_new[:,1] = -orientation[:,1]
-    orien_new[:,2] = -orientation[:,2]
-    orien_new[:,3] = -orientation[:,3]
-    orientation = orien_new
+    with h5py.File(PREFIX + 'MS2_10k_subset.h5', 'r') as fptr:
+        intens = fptr['intens'][:nintens]
+        # Load z1 and z2 pca components of cc-matrix(calculated for 2d intens)
+        z1_pca = fptr['z1_pca'][:nintens]
+        z2_pca = fptr['z2_pca'][:nintens]
+    orientation = np.load(PREFIX + 'orient_10k_subet.npy')[:nintens] # sic
+    orientation[:,1:] *= -1.
 
-    '''Load z1 and z2 pca components of cc-matrix(calculated for 2d intens)'''
-    with h5py.File('/home/mallabhi/StrucNN/data/MS2_10k_subset.h5', 'r') as f:
-        z1_pca = f['z1_pca'][:]
-        z2_pca = f['z2_pca'][:]
+    # Calculate pixel radii
+    ind = np.arange(intens.shape[-1]) - intens.shape[-1]//2
+    x, y = np.meshgrid(ind, ind, indexing='ij')
+    rad = np.sqrt(x**2 + y**2)
+    rad[rad==0] = 1e-4
+    # Hard coded function to get flat radial profile
+    ave_2d = 1.36e8 * rad**-3.56 + 6.89
 
-    '''Normalizing Intensity vals to range: 0-1'''
-    sz = intens.shape[1]
-    x0, y0 = np.indices((sz,sz))
-    x0 -= sz//2
-    y0 -= sz//2
-    rad_float = np.sqrt(x0**2 + y0**2)
-    rad_float[rad_float==0] = 1e-3
-    ave_2d = np.array([ave_fun(i,1.36e8,3.56,6.89) for i in rad_float.ravel()]).reshape(sz,sz)
+    # Normalizing Intensity vals to range: 0-1
+    norm_intens = intens / ave_2d
+    norm_intens *= 0.99 / norm_intens.max()
 
-    norm_intens = intens/ave_2d
-    input_intens = norm_intens/np.max(norm_intens) * 0.99
-    input_intens = sample_down_intens(input_intens)
+    # Resample input intensities
+    input_intens = sample_down_intens(norm_intens)
 
     print('Data Processed.')
     return input_intens, orientation, z1_pca, z2_pca
@@ -62,7 +49,7 @@ def sample_down_intens(intens_input):
     size = intens_input.shape[1]//2
     x_orig = np.arange(-size, size+1, 1.) / size
     y_orig = np.arange(-size, size+1, 1.) / size
-    lmax =50 
+    lmax =50
     step_pix = 1.33
     x_new = np.arange(-lmax, lmax+1, 1) / size * step_pix
     y_new = np.arange(-lmax, lmax+1, 1) / size * step_pix
@@ -74,21 +61,24 @@ def sample_down_intens(intens_input):
     intens_input_c = mask_circle(intens_input_c)
     return intens_input_c
 
-def split_data(input_intens, orientation, z1_pca, z2_pca, data_points, split_ratio):
+def split_data(input_intens, orientation, z1_pca, z2_pca, split_ratio):
     '''Splitting the data into training and validation dataset'''
-    t_intens = input_intens[:int(data_points*split_ratio),:,:]
-    t_ori = orientation[:int(data_points*split_ratio),:]
-    t_z1_pca = z1_pca[:int(data_points*split_ratio)]
-    t_z2_pca = z2_pca[:int(data_points*split_ratio)]
-
-    v_intens = input_intens[int(data_points*split_ratio):,:,:]
-    v_ori = orientation[int(data_points*split_ratio):,:]
-    v_z1_pca = z1_pca[int(data_points*split_ratio):]
-    v_z2_pca = z2_pca[int(data_points*split_ratio):]
-    print('Total Training Datapoints:', len(t_ori))
-    print('Total Validation Datapoints:', len(v_ori))
-    return t_intens, t_ori, t_z1_pca, t_z2_pca, v_intens, v_ori, v_z1_pca, v_z2_pca
-
+    n_train = int(len(input_intens) * split_ratio)
+    print('Total Training Datapoints:', n_train)
+    print('Total Validation Datapoints:', len(input_intens) - n_train)
+    train_dict = {'input_intens': input_intens[:n_train],
+                  'orientation': orientation[:n_train],
+                  'z1_pca': z1_pca[:n_train],
+                  'z2_pca': z2_pca[:n_train],
+                  'train': True,
+                  'save': False}
+    valid_dict = {'input_intens': input_intens[n_train:],
+                  'orientation': orientation[n_train:],
+                  'z1_pca': z1_pca[n_train:],
+                  'z2_pca': z2_pca[n_train:],
+                  'train': False,
+                  'save': False}
+    return train_dict, valid_dict
 
 def sample_down_plane(input_plane):
     '''Scaled down sliced plane'''
@@ -101,16 +91,15 @@ def sample_down_plane(input_plane):
     x_new = np.arange(-lmax, lmax+1, 1) / lmax * frac_vox
     y_new = np.arange(-lmax, lmax+1, 1) / lmax * frac_vox
     return interpf(x_new, y_new)
-    
 
 def get_detector():
     ''''Get Detector Pixel Coordinates'''
-    with h5py.File('/home/mallabhi/SPIEncoder/data/det_vae.h5', 'r') as f:
-        qx1 = f['qx'][:].reshape(503, 503)
-        qy1 = f['qy'][:].reshape(503, 503)
-        qz1 = f['qz'][:].reshape(503, 503)
-  
-    '''Normalizing Detector qx, qy and qz coordinates'''
+    with h5py.File('/home/mallabhi/SPIEncoder/data/det_vae.h5', 'r') as fptr:
+        qx1 = fptr['qx'][:].reshape(503, 503)
+        qy1 = fptr['qy'][:].reshape(503, 503)
+        qz1 = fptr['qz'][:].reshape(503, 503)
+
+    # Normalizing Detector qx, qy and qz coordinates
     factor = np.sqrt(qx1**2 + qy1**2 + qz1**2).max()
     qx_d = qx1/factor
     qy_d = qy1/factor
@@ -119,5 +108,3 @@ def get_detector():
     qy_ds = sample_down_plane(qy_d)
     qz_ds = sample_down_plane(qz_d)
     return qx_ds, qy_ds, qz_ds
-
-
