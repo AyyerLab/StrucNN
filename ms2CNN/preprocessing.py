@@ -3,7 +3,7 @@ import numpy as np
 import h5py
 from scipy import interpolate
 
-PREFIX = '/home/mallabhi/strucNN/data/'
+PREFIX = '/home/mallabhi/StrucNN/data/'
 
 def load_data(nintens=None):
     '''Load object's size, 2D Intensity avgs. and corresponding orientations'''
