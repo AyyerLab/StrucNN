@@ -106,7 +106,6 @@ def run_network(train=True, save=False, input_intens=None,
 config = configparser.ConfigParser()
 config.read('config.ini')
 
-OUT_PREFIX = config.get('decoder', 'output_prefix')
 LR = config.getfloat('decoder', 'learning_rate')
 N_INTENS = config.getint('decoder', 'n_intens')
 BATCH_SIZE = config.getint('decoder', 'batch_size')
@@ -114,8 +113,8 @@ N_EPOCHS = config.getint('decoder', 'n_epochs')
 SPLIT_RATIO = config.getfloat('decoder', 'split_ratio')
 VOL_SIZE = config.getint('decoder', 'vol_size')
 DEVICE_IDS = [int(devnum) for devnum in config.get('decoder', 'device_ids').split()]
-OUTDICT_FNAME = OUT_PREFIX + config.get('decoder', 'outdict_fname'))
-OUTDATA_FNAME = OUT_PREFIX + config.get('decoder', 'outdata_fname'))
+OUTDICT_FNAME = config.get('decoder', 'outdict_fname'))
+OUTDATA_FNAME = config.get('decoder', 'outdata_fname'))
 
 # Loading data and detector File
 all_intens, all_ori, all_objsize = preprocessing.load_data(N_INTENS)
