@@ -1,9 +1,12 @@
 '''Functions to load and process data before training'''
+import configparser
 import numpy as np
 import h5py
 from scipy import interpolate
 
-PREFIX = '/home/mallabhi/StrucNN/data/'
+config = configparser.ConfigParser()
+config.read('config.ini')
+PREFIX = config.get('decoder', 'input_prefix')
 
 def load_data(nintens=None):
     '''Load object's size, 2D Intensity avgs. and corresponding orientations'''
