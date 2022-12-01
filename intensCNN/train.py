@@ -9,7 +9,7 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 
-from network import DecoderCNN
+import network
 import preprocessing
 
 def _q_rotation(x, y, z, quat):
@@ -115,6 +115,7 @@ VOL_SIZE = config.getint('decoder', 'vol_size')
 DEVICE_IDS = [int(devnum) for devnum in config.get('decoder', 'device_ids').split()]
 OUTDICT_FNAME = config.get('decoder', 'outdict_fname'))
 OUTDATA_FNAME = config.get('decoder', 'outdata_fname'))
+DecoderCNN = getattr(network, config.get('decoder', 'network_class'))
 
 # Loading data and detector File
 all_intens, all_ori, all_objsize = preprocessing.load_data(N_INTENS)

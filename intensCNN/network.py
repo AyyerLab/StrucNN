@@ -2,7 +2,7 @@
 import torch
 from torch import nn
 
-class DecoderCNN(nn.Module):
+class DecoderCNNSim(nn.Module):
     '''Convolution NN to predict sliced intensities for given particle size'''
     def __init__(self):
         super().__init__()
