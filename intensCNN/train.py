@@ -1,5 +1,6 @@
 import sys
 import time
+import configparser
 
 import numpy as np
 import h5py
@@ -10,8 +11,6 @@ import torch.nn.functional as F
 
 from network import DecoderCNN
 import preprocessing
-
-OUT_PREFIX = '/home/ayyerkar/acads/ms2_deepl/'
 
 def _q_rotation(x, y, z, quat):
     '''Get Rotation Matrix from quaternions.
@@ -50,7 +49,7 @@ def loss_function(recon_intens_3d, slices, images, bnum):
         symarrth = friedel_symm(arrth)
         recon_images[i] = best_projection_slice(torch.Tensor.permute(symarrth, (0,3,2,1)),
                                                 slices, bnum*BATCH_SIZE + i)
-        recon_images[i] = torch.Tensor.permute(recon_images[i], (0,2,1))
+        recon_images[i] = torch.Tensor.permute(recon_images[i].clone(), (0,2,1))
         # No Symmetrization
         #recon_images[i] = best_projection_slice(torch.Tensor.permute(arrth, (0,3,2,1)),
         #                                        slices, bnum*BATCH_SIZE + i)
@@ -104,13 +103,19 @@ def run_network(train=True, save=False, input_intens=None,
     return epochloss / len(input_intens), true_intens, pred_intens, true_objsize, recon_vol
 
 # HYPERPARMETERS
-LR = 1e-4 # Learning Rate
-N_INTENS = 100
-BATCH_SIZE = 8
-N_EPOCHS = 500
-SPLIT_RATIO = 0.80
-VOL_SIZE = 165
-DEVICE_IDS = [1,2,3]
+config = configparser.ConfigParser()
+config.read('config.ini')
+
+OUT_PREFIX = config.get('decoder', 'output_prefix')
+LR = config.getfloat('decoder', 'learning_rate')
+N_INTENS = config.getint('decoder', 'n_intens')
+BATCH_SIZE = config.getint('decoder', 'batch_size')
+N_EPOCHS = config.getint('decoder', 'n_epochs')
+SPLIT_RATIO = config.getfloat('decoder', 'split_ratio')
+VOL_SIZE = config.getint('decoder', 'vol_size')
+DEVICE_IDS = [int(devnum) for devnum in config.get('decoder', 'device_ids').split()]
+OUTDICT_FNAME = OUT_PREFIX + config.get('decoder', 'outdict_fname'))
+OUTDATA_FNAME = OUT_PREFIX + config.get('decoder', 'outdata_fname'))
 
 # Loading data and detector File
 all_intens, all_ori, all_objsize = preprocessing.load_data(N_INTENS)
@@ -119,6 +124,7 @@ qx_d, qy_d, qz_d = preprocessing.get_detector()
 print('Total Dataset Points:', N_INTENS)
 print('Total # of Training Epochs:', N_EPOCHS)
 print('Batch Size:', BATCH_SIZE)
+sys.stdout.flush()
 
 # Splitting the Dataset into Train/Valid sets
 train_data, valid_data = preprocessing.split_data(all_intens, all_ori, all_objsize, SPLIT_RATIO)
@@ -151,16 +157,18 @@ for epoch in range(N_EPOCHS):
         valid_data['save'] = True
         v_loss, v_true_intens, v_pred_intens, v_objsize, v_recon_vol = run_network(**valid_data)
     sys.stderr.write('\rEPOCH %d/%d: '%(epoch+1, N_EPOCHS))
-    sys.stderr.write('Training loss: %f, '%t_loss)
-    sys.stderr.write('Validation loss: %f, '%v_loss)
+    sys.stderr.write('Training loss: %e, '%t_loss)
+    sys.stderr.write('Validation loss: %e, '%v_loss)
     sys.stderr.write('%.3f s/iteration   ' % ((time.time() - stime) / (epoch+1)))
+    sys.stderr.flush()
     train_loss.append(t_loss)
     valid_loss.append(v_loss)
 sys.stderr.write('\n')
+sys.stderr.flush()
 
-torch.save(model.module.state_dict(), OUT_PREFIX + 'intensCNN_dict')
+torch.save(model.module.state_dict(), OUTDICT_FNAME)
 
-with h5py.File(OUT_PREFIX + 'valid_data.h5', "w") as f:
+with h5py.File(OUTDATA_FNAME, "w") as f:
     f['true_intens'] = v_true_intens
     f['pred_intens'] = v_pred_intens
     f['objsize'] = v_objsize
