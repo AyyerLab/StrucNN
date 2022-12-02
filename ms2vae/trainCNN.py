@@ -27,9 +27,9 @@ print('Total Dataset Points:', DATA_POINTS)
 '''Learning Rate'''      
 LR = 1e-4
 '''Batch Size''' 
-BATCH_SIZE = 32
+BATCH_SIZE = 4
 '''# of EPOCHS'''
-N_EPOCHS = 1000
+N_EPOCHS = 400
 
 print('Total # of Training Epochs:', N_EPOCHS)
 print('Batch Size:', BATCH_SIZE)
@@ -79,23 +79,19 @@ def best_projection_slice(recon_intens_3d, slices, ind):
             padding_mode='zeros', 
             align_corners=True)[0][0][:,:].reshape(grid.shape[0], grid.shape[0])
 
-def loss_function(epoch, recon_intens_3d, slices, images, bnum):
+def loss_function(epoch, recon_intens_3d, slices, images, bnum, mu, logvar):
     recon_images = torch.zeros_like(images)
     for i in range(BATCH_SIZE):
-        '''Applying Symmetrization : Friedal Symmetry or Icosahedra Symmetry'''
+        '''Applying Symmetrization : Friedal Symmetry'''
         arrth = recon_intens_3d[i]
         symarrth = friedel_symm(arrth)
         recon_intens_3d_sym = symarrth
         recon_images[i] = best_projection_slice(torch.Tensor.permute(recon_intens_3d_sym, (0,3,2,1)), slices, bnum*BATCH_SIZE + i)
         recon_images[i] = torch.Tensor.permute(recon_images[i], (0,2,1))
-        '''No Symmetrization'''
-        #else:
-        #recon_images[i] = best_projection_slice(torch.Tensor.permute(recon_intens_3d[i], (0,3,2,1)), slices, bnum*BATCH_SIZE + i)
-        #recon_images[i] = torch.Tensor.permute(recon_images[i], (0,2,1))
-    SEloss =  ((recon_images - images)**2).sum() 
-    KLDloss = model.module.encoder.kl
-    loss = SEloss + KLDloss
-    return loss, SEloss, KLDloss, recon_images, recon_intens_3d_sym
+    BSE =  ((recon_images - images)**2).sum() 
+    KLD = -0.5 * torch.mean(1 + logvar - mu.pow(2) - logvar.exp())
+    LOSS = BSE + KLD
+    return LOSS, BSE, KLD, recon_images
 
 
 def friedel_symm(recon_intens_3d):
@@ -104,11 +100,11 @@ def friedel_symm(recon_intens_3d):
     return (a + torch.flip(a, dims = (1,2,3))) / 2  
 
 def trainNN(epoch, input_intens, orientation):
-    epochloss=0
-    vsize=267
+    epochloss = 0
+    bseloss = 0
+    kldloss=0
     mu_ = []
-    sigma_ = []
-    recon_3dVol = np.zeros((0,vsize,vsize,vsize))
+    logvar_ = []
     true_intens = np.zeros((BATCH_SIZE, input_intens.shape[1], input_intens.shape[1]))
     pred_intens = np.zeros((BATCH_SIZE, input_intens.shape[1], input_intens.shape[1]))
     for i in range(len(orientation)//BATCH_SIZE):
@@ -120,50 +116,47 @@ def trainNN(epoch, input_intens, orientation):
         oris = torch.from_numpy(ori_batch).view(BATCH_SIZE, 4)
         oris = oris.float().to(device)
         
-        output, mu, sigma = model.forward(images, oris) 
-        loss, seloss, kldloss, recon_2D_x, recon_intens_3d_sym = loss_function(epoch, output, slices_s, images, i)
+        output, mu, logvar = model.forward(images, oris) 
+        loss, bse, kld, recon_2D_x = loss_function(epoch, output, slices_s, images, i, mu, logvar)
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
+        
+        bseloss += bse.data.item()
+        kldloss += kld.data.item()
         epochloss += loss.data.item()
-        #if epoch == (N_EPOCHS-1):
         if epoch % 10==0:
-            recon_3dVol = np.concatenate((recon_3dVol, recon_intens_3d_sym.detach().cpu().clone().numpy().reshape(1,vsize,vsize,vsize)), axis=0)
             true_intens = np.concatenate((true_intens, images.detach().cpu().clone().numpy().reshape(BATCH_SIZE, input_intens.shape[1], input_intens.shape[1])), axis=0)
             pred_intens = np.concatenate((pred_intens, recon_2D_x.detach().cpu().clone().numpy().reshape(BATCH_SIZE, input_intens.shape[1], input_intens.shape[1])), axis=0)
             mu_.append(mu.detach().cpu().numpy())
-            sigma_.append(sigma.detach().cpu().numpy())
-    return true_intens, pred_intens, (epochloss/len(orientation)), recon_3dVol, mu_, sigma_
+            logvar_.append(logvar.detach().cpu().numpy())
+    return true_intens, pred_intens, mu_, logvar_, epochloss/len(orientation), bseloss/len(orientation), kldloss/len(orientation)
 
 training_loss = []
+bse_loss = []
+kld_loss = []
 stime = time.time()
 for epoch in np.arange(N_EPOCHS)+1:
-    true_intens, pred_intens, loss, recon_vol, mu, sigma = trainNN(epoch, input_intens, orientation)
+    true_intens, pred_intens, mu, logvar, loss, bseloss, kldloss = trainNN(epoch, input_intens, orientation)
+    training_loss.append(loss)
+    bse_loss.append(bseloss)
+    kld_loss.append(kldloss)
+    sys.stderr.write('\rEPOCH %d/%d: '%(epoch, N_EPOCHS))
+    sys.stderr.write('Training loss: %e, '%loss)
+    sys.stderr.write('SE loss: %e, '%bseloss)
+    sys.stderr.write('KLD loss: %e, '%kldloss)
+    sys.stderr.write('%.3f s/iteration   ' % ((time.time() - stime) / (epoch+1)))
     if epoch %10==0:
-        torch.save(model.module.state_dict(), '/home/mallabhi/StrucNN/ms2vae/output/vae_dict_2')
-
-        with h5py.File('/home/mallabhi/StrucNN/ms2vae/output/valid_data_2.h5', "w") as f:
+        torch.save(model.module.state_dict(), '/home/mallabhi/StrucNN/ms2vae/output/vae_dict_3_ms2b123')
+        with h5py.File('/home/mallabhi/StrucNN/ms2vae/output/valid_data_ms2b123.h5', "w") as f:
                         f['true_intens'] = true_intens
                         f['pred_intens'] = pred_intens
                         f['loss'] = training_loss
+                        f['bseloss'] = bse_loss
+                        f['kldloss'] = kld_loss
                         f['mu'] = mu
-                        f['sigma'] = sigma
-                        f['recon_vol'] = recon_vol
-    sys.stderr.write('\rEPOCH %d/%d: '%(epoch+1, N_EPOCHS))
-    sys.stderr.write('Training loss: %e, '%loss)
-    sys.stderr.write('%.3f s/iteration   ' % ((time.time() - stime) / (epoch+1)))
-    training_loss.append(loss)
+                        f['logvar'] = logvar
+
 sys.stderr.write('\n')
 
-training_loss = np.array(training_loss)
-
-torch.save(model.module.state_dict(), '/home/mallabhi/StrucNN/ms2vae/output/vae_dict_2')
-
-with h5py.File('/home/mallabhi/StrucNN/ms2vae/output/valid_data_2.h5', "w") as f:
-                f['true_intens'] = true_intens
-                f['pred_intens'] = pred_intens
-                f['loss'] = training_loss
-                f['mu'] = mu
-                f['sigma'] = sigma
-                f['recon_vol'] = recon_vol
 print('Training & Validation Done, Data Saved') 
