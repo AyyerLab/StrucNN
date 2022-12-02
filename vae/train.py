@@ -11,7 +11,7 @@ import torch.nn.functional as F
 from network import VAE
 import preprocessing
 
-OUT_PREFIX = '/home/ayyerkar/acads/ms2_deepl/'
+OUT_PREFIX = '/u/kayyer/acads/ms2_deepl/output/'
 
 def _q_rotation(x, y, z, quat):
     '''Get Rotation Matrix from quaternions.
@@ -50,7 +50,7 @@ def loss_function(recon_intens_3d, slices, images, bnum):
         symarrth = friedel_symm(arrth)
         recon_images[i] = best_projection_slice(torch.Tensor.permute(symarrth, (0,3,2,1)),
                                                 slices, bnum*BATCH_SIZE + i)
-        recon_images[i] = torch.Tensor.permute(recon_images[i], (0,2,1))
+        recon_images[i] = torch.Tensor.permute(recon_images[i].clone(), (0,2,1))
         # No Symmetrization
         #recon_images[i] = best_projection_slice(torch.Tensor.permute(arrth, (0,3,2,1)),
         #                                        slices, bnum*BATCH_SIZE + i)
@@ -123,6 +123,7 @@ qx_d, qy_d, qz_d = preprocessing.get_detector()
 print('Total Dataset Points:', N_INTENS)
 print('Total # of Training Epochs:', N_EPOCHS)
 print('Batch Size:', BATCH_SIZE)
+sys.stdout.flush()
 
 # Load Network
 model = VAE(LATENT_DIMS)
@@ -147,8 +148,10 @@ for epoch in np.arange(N_EPOCHS) + 1:
     sys.stderr.write('\rEPOCH %d/%d: '%(epoch, N_EPOCHS))
     sys.stderr.write('Training loss: %f, '%t_loss)
     sys.stderr.write('%.3f s/iteration   ' % ((time.time() - stime) / (epoch+1)))
+    sys.stderr.flush()
     train_loss.append(t_loss)
 sys.stderr.write('\n')
+sys.stderr.flush()
 
 torch.save(model.module.state_dict(), OUT_PREFIX + 'sim_vae_dict')
 
