@@ -1,46 +1,43 @@
 import torch
 import torch.nn as nn
 import numpy as np
-import torch.distributions
 
 class Encoder(nn.Module):
+        def sampling(self, mu, logvar):
+            std = torch.exp(0.5*logvar)
+            eps = torch.randn_like(std)
+            return eps.mul(std).add_(mu)
+
         def __init__(self, latent_dims):
             super(Encoder, self).__init__()
-            self.conv1 = nn.Conv2d(1, 8, 3, 3)
+            self.conv1 = nn.Conv2d(1, 8, 5, 3)
             self.norm1 = nn.BatchNorm2d(8)
-            self.conv2 = nn.Conv2d(8, 16, 3, 3)
+            self.conv2 = nn.Conv2d(8, 16, 5, 3)
             self.norm2 = nn.BatchNorm2d(16)
-            self.conv3 = nn.Conv2d(16, 32, 3, 3)
+            self.conv3 = nn.Conv2d(16, 32, 5, 3)
             self.norm3 = nn.BatchNorm2d(32)
-            self.conv4 = nn.Conv2d(32, 64, 3, 3)
-            self.norm4 = nn.BatchNorm2d(64)
 
-            self.fc1 = nn.Linear(64+4, 512)
-            self.fc2 = nn.Linear(512, 128)
-            self.fc3 = nn.Linear(128, 64)
-            self.fc4 = nn.Linear(64, 8)
+            self.fc1 = nn.Linear(128+4, 128)
+            self.fc2 = nn.Linear(128, 64)
+            self.fc3 = nn.Linear(64, 8)
+            self.fc4 = nn.Linear(8, latent_dims)
             self.fc5 = nn.Linear(8, latent_dims)
-            self.fc6 = nn.Linear(8, latent_dims)
             self.relu = nn.ReLU()
-            self.kl = 0
             
         def forward(self, x, orientation):
             x = self.relu(self.norm1(self.conv1(x)))
             x = self.relu(self.norm2(self.conv2(x)))
             x = self.relu(self.norm3(self.conv3(x)))
-            x = self.relu(self.norm4(self.conv4(x)))
             x = x.view(x.shape[0], -1)
             x = torch.cat((x, orientation), 1)
             x = self.relu(self.fc1(x))
             x = self.relu(self.fc2(x))
             x = self.relu(self.fc3(x))
-            x = self.relu(self.fc4(x))
 
-            mu = self.fc5(x)
-            sigma = torch.exp(self.fc6(x))
-            z = mu + sigma * torch.randn_like(mu)
-            self.kl = (sigma**2 + mu**2 - torch.log(sigma) - 1/2).sum()
-            return z, mu , sigma
+            mu = self.fc4(x)
+            logvar = self.fc5(x)
+            z = self.sampling(mu, logvar)
+            return z, mu, logvar
 
 class Decoder(nn.Module):
         def unflatten(self, input_arr):
@@ -73,6 +70,6 @@ class VAE(nn.Module):
         self.decoder = Decoder(latent_dims)
 
     def forward(self, x, orientation):
-        z, mu, sigma = self.encoder(x, orientation)
-        return self.decoder(z), mu, sigma
+        z, mu, logvar = self.encoder(x, orientation)
+        return self.decoder(z), mu, logvar
 
