@@ -2,6 +2,8 @@ import torch
 import torch.nn as nn
 import numpy as np
 
+'''Encoder and Decoder  architecture for beta-VAE'''
+
 class Encoder(nn.Module):
         def sampling(self, mu, logvar):
             std = torch.exp(0.5*logvar)
@@ -17,25 +19,27 @@ class Encoder(nn.Module):
             self.conv3 = nn.Conv2d(16, 32, 5, 3)
             self.norm3 = nn.BatchNorm2d(32)
 
-            self.fc1 = nn.Linear(128+4, 128)
+            self.fc1 = nn.Linear(800+4, 128)
             self.fc2 = nn.Linear(128, 64)
             self.fc3 = nn.Linear(64, 8)
             self.fc4 = nn.Linear(8, latent_dims)
             self.fc5 = nn.Linear(8, latent_dims)
+
             self.relu = nn.ReLU()
-            
+
         def forward(self, x, orientation):
             x = self.relu(self.norm1(self.conv1(x)))
             x = self.relu(self.norm2(self.conv2(x)))
             x = self.relu(self.norm3(self.conv3(x)))
             x = x.view(x.shape[0], -1)
+
             x = torch.cat((x, orientation), 1)
             x = self.relu(self.fc1(x))
             x = self.relu(self.fc2(x))
             x = self.relu(self.fc3(x))
-
             mu = self.fc4(x)
             logvar = self.fc5(x)
+
             z = self.sampling(mu, logvar)
             return z, mu, logvar
 
