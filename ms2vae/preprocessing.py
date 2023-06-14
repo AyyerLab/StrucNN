@@ -14,26 +14,11 @@ def ave_fun(q, a,b,c):
     return a*q**(-b) + c
 
 def load_data():
-    '''Load object's size, 2D Intensity avgs. and corresponding orientations'''
-   # with h5py.File('/home/mallabhi/StrucNN/data/MS2_10k_subset.h5', 'r') as f:
-   #     intens = f['intens'][:1000]
+    '''Load object's size, 2D Intensity avgs. and corresponding orientations, FULL DATASET'''
+    with h5py.File('/u/mallabhi/StrucNN/data/MS2_manual_sel.h5', 'r') as f:
+        intens = f['intens'][:]
+        orientation  = f['orientation'][:]
 
-    with h5py.File('/home/mallabhi/StrucNN/data/MS2_set.h5', 'r') as f:
-        intens_b1 = f['intens_b1'][:150]
-        orien_b1 = f['ori_b1'][:150]
-    with h5py.File('/home/mallabhi/StrucNN/data/MS2_set.h5', 'r') as f:
-        intens_b2 = f['intens_b2'][:150]
-        orien_b2 = f['ori_b2'][:150]
-    with h5py.File('/home/mallabhi/StrucNN/data/MS2_set.h5', 'r') as f:
-        intens_b3 = f['intens_b3'][:150]
-        orien_b3 = f['ori_b3'][:150]
-    intens = np.append(intens_b1, intens_b2, axis=0)
-    intens = np.append(intens, intens_b3, axis = 0)
-
-    orientation = np.append(orien_b1, orien_b2, axis=0)
-    orientation = np.append(orientation, orien_b3, axis=0)
-    
-    #orientation = np.load('/home/mallabhi/StrucNN/data/orient_10k_subet.npy')[:1000]
     orien_new = np.zeros((len(orientation), 4))
     orien_new[:,0] = orientation[:,0]
     orien_new[:,1] = -orientation[:,1]
@@ -85,8 +70,8 @@ def sample_down_intens(intens_input):
     size = intens_input.shape[1]//2
     x_orig = np.arange(-size, size+1, 1.) / size
     y_orig = np.arange(-size, size+1, 1.) / size
-    lmax =50 
-    step_pix = 2
+    lmax =85
+    step_pix = 1.5
     x_new = np.arange(-lmax, lmax+1, 1) / size * step_pix
     y_new = np.arange(-lmax, lmax+1, 1) / size * step_pix
     intens_input_c = np.zeros([num_l, 2*lmax+1, 2*lmax+1])
@@ -103,7 +88,7 @@ def sample_down_plane(input_plane):
     x_orig = np.arange(-size, size+1, 1) / size
     y_orig = np.arange(-size, size+1, 1) / size
     interpf = interpolate.interp2d(x_orig, y_orig, input_plane, kind='cubic')
-    lmax = 50
+    lmax = 85
     frac_vox = 1
     x_new = np.arange(-lmax, lmax+1, 1) / lmax * frac_vox
     y_new = np.arange(-lmax, lmax+1, 1) / lmax * frac_vox
@@ -112,7 +97,7 @@ def sample_down_plane(input_plane):
 
 def get_detector():
     ''''Get Detector Pixel Coordinates'''
-    with h5py.File('/home/mallabhi/SPIEncoder/data/det_vae.h5', 'r') as f:
+    with h5py.File('/u/mallabhi/StrucNN/data/det_vae.h5', 'r') as f:
         qx1 = f['qx'][:].reshape(503, 503)
         qy1 = f['qy'][:].reshape(503, 503)
         qz1 = f['qz'][:].reshape(503, 503)
