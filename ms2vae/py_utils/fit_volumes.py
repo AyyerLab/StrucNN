@@ -1,10 +1,9 @@
-import numpy as np
-import h5py
-from scipy import optimize
-from scipy import ndimage
-
-import sys
 import os
+import sys
+import h5py
+import numpy as np
+from scipy import ndimage
+from scipy import optimize
 
 def sphere(qvals, a, dia):
     s = np.pi*qvals*dia
@@ -16,7 +15,7 @@ diams = np.arange(1, 100, 0.1)
 msphere = np.array([sphere(qvals, 1, d) for d in diams])
 
 
-with h5py.File('/u/mallabhi/StrucNN/ms2vae/output/radavg_volumes_l2_01.h5', 'r') as f:
+with h5py.File('/u/mallabhi/StrucNN/ms2vae/output/radavg_volumes.h5', 'r') as f:
     radavg_vol = f['radavg_vol'][:]
     vol = f['vol'][:]
 
@@ -28,7 +27,7 @@ popts = []
 fits = []
 radavgs = []
 for i in range(len(vol)):
-    cc = np.corrcoef(radavg_vol[0][18:68], msphere)[0,1:]
+    cc = np.corrcoef(radavg_vol[i][18:68], msphere)[0,1:]
     popt, pcov = optimize.curve_fit(sphere, qvals,radavg_vol[i][18:68], p0=(3e4, diams[cc.argmax()]), maxfev=20000)
     popts.append(popt)
     fits.append(sphere(qvals, popt[0], popt[1]))
@@ -43,7 +42,7 @@ fits = np.array(fits)
 popts = np.array(popts)
 
 
-with h5py.File('/u/mallabhi/StrucNN/ms2vae/output/fit_volumes_l2_01.h5', 'w') as f:
+with h5py.File('/u/mallabhi/StrucNN/ms2vae/output/fit_volumes_fix.h5', 'w') as f:
     f['popts'] = popts
     f['fits'] = fits
     f['radavgs'] = radavgs
