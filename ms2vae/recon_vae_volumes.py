@@ -1,17 +1,32 @@
-import numpy as np
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-
-import mrcfile
-import neoemc as ne
-import quaternion as quat
+import configparser
 import h5py
 from scipy import ndimage
 from scipy.signal import argrelextrema
 import network
 import sys
 import os
+import torch
+import numpy as np
+
+import torch.nn as nn
+import torch
+
+config = configparser.ConfigParser()
+config.read('recon_config.ini')
+
+NUM_START = int(config['Hyperparameters']['NUM_START'])
+NUM_END = int(config['Hyperparameters']['NUM_END'])
+BATCH_SIZE = int(config['Hyperparameters']['BATCH_SIZE'])
+LATENT_DIMS = int(config['Hyperparameters']['LATENT_DIMS'])
+ICO_SYMMETRIZATION = config['Hyperparameters'].getboolean('ICO_SYMMETRIZATION')
+
+DEFINED_COORDINATES = config['Hyperparameters'].getboolean('DEFINED_COORDINATES')
+
+OUTPUT_FILE = config['Files']['OUTPUT_FILE']
+DEFINED_COORDINATES_FILE = config['Files']['DEFINED_COORDINATES_FILE']
+
+VAE_MODEL_FILE = config['Files']['VAE_MODEL_FILE']
+VOLUMES_FILE = config['Files']['VOLUMES_FILE']
 
 
 def radial_average(intens):
@@ -24,11 +39,6 @@ def radial_average(intens):
     radial_count[radial_count==0] = 1e-4
     radial_avg = radial_sum / radial_count
     return radial_avg, bins
-
-
-def ave_fun(q, a,b,c):
-    '''Scaling 2D Intensitis with mean of radial average of all 2D-Intensities in datatset'''
-    return a*q**(-b) + c
 
 
 def _mask_reconVol(recon_vol):
@@ -59,6 +69,7 @@ def bg_subtract(vol, bgrad=8.,r_min=13, r_max=80):
     ini[outmask] = -1
     return ini.astype('f4')
 
+
 def _scale_reconVol(recon_vol):
     '''scaling back data using ave_3d function'''
     scale = 171
@@ -72,6 +83,12 @@ def _scale_reconVol(recon_vol):
     ave_3d_pad = np.pad(ave_3d, 48, mode='constant')
     return ave_3d_pad*recon_vol
 
+
+def ave_fun(q, a,b,c):
+    '''Scaling 2D Intensitis with mean of radial average of all 2D-Intensities in datatset'''
+    return a*q**(-b) + c
+
+
 def ico_symm(recon_intens_3d):
     '''Apply Icosahedral Symmetry'''
     sym_models = recon_intens_3d.clone()
@@ -83,86 +100,90 @@ def ico_symm(recon_intens_3d):
     return sym_models/len(quats)
 
 
-with h5py.File('/u/mallabhi/StrucNN/ms2vae/output/ms2_sel_l2_01.h5', 'r') as f:
-    mu = f['mu'][:]
-m1 = mu[:,0].ravel()[1344*3:]
-m2 = mu[:,1].ravel()[1344*3:]
+def friedel_symm(recon_intens_3d):
+    '''Apply friedel symmetry to the reconstructed volume'''
+    a = recon_intens_3d
+    return (a + torch.flip(a, dims = (0,1,2))) / 2
 
-BATCH_SIZE=8
 
-LATENT_DIMS=2
-print('Latent Dims:', LATENT_DIMS)
+def sampling(mu, logvar):
+    std = np.exp(0.5 * logvar)
+    eps = np.random.randn(*std.shape)
+    z = eps * std + mu
+    return z
+
+if DEFINED_COORDINATES:
+    with h5py.File(DEFINED_COORDINATES_FILE, 'r') as f:
+        mu = f['mu'][:]
+else:
+    with h5py.File(OUTPUT_FILE, 'r') as f:
+        mu = f['mu'][NUM_START:NUM_END]
+
+
 model = network.VAE(LATENT_DIMS)
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 print('Device:', device)
-model.load_state_dict(torch.load('/u/mallabhi/StrucNN/ms2vae/output/vae_ms2_sel_l2_01', map_location=device))
+model.load_state_dict(torch.load(VAE_MODEL_FILE, map_location=device))
 print('Model Loaded')
 sys.stdout.flush()
+model.to(device)
+if torch.cuda.device_count()>1:
+    model = nn.DataParallel(model, device_ids=[0,1,2,3])
+sys.stdout.flush()
 
-'''Latent coordinated'''
-#straight trajectory
-#x1, y1 = -1.8, -0.2
-#x2, y2 = 0.2, 1.23
-#slope = (y2-y1)/(x2-x1)
-#y_intercept = y1 - slope*x1
-#x_values = np.linspace(x1, x2, num=20)
-#y_values = np.array([slope*x + y_intercept for x in x_values])
-#coordsx = torch.Tensor(x_values.tolist())
-#coordsy = torch.Tensor(y_values.tolist())
 
-#curved trajectory
-#coordsx = torch.Tensor(np.linspace(1.6,-1.8, 10).tolist())
-#coordsy = torch.Tensor((-0.4*(coordsx)**2+1).tolist())
-
-#Volumes for all mu's
-coordsx = torch.Tensor(m1.tolist())
-coordsy = torch.Tensor(m2.tolist())
-coords = np.vstack((coordsx, coordsy)).T
-
-num_coords = len(coords)
-recon_vol = np.zeros((len(coords), 267,267,267))
-for i in range(len(coords)//BATCH_SIZE):
-    batch_coords = coords[i*BATCH_SIZE:(i+1)*BATCH_SIZE]
-    batch_recon_vol = np.array(model.decoder(torch.Tensor(batch_coords)).detach().numpy())
+num_coords = len(mu)
+recon_vol = np.zeros((len(mu), 267,267,267))
+for i in range(len(mu)//BATCH_SIZE):
+    batch_mu = mu[i*BATCH_SIZE:(i+1)*BATCH_SIZE]
+    #batch_recon_vol = np.array(model.decoder(torch.Tensor(batch_z)).detach().numpy())
+    batch_recon_vol = model.module.decoder(torch.Tensor(batch_mu).to(device)).detach().cpu().numpy()
     recon_vol[i*BATCH_SIZE:(i+1)*BATCH_SIZE] = batch_recon_vol[:,0,:,:,:]
-    print('which vol batch generated:',i+1)
+    sys.stderr.write('\rVolume Generated, Batch %d/%d: '%(i+1, (len(mu)//BATCH_SIZE)))
     sys.stdout.flush()
-print('Volume Generated & Masked')
+print('Volume Generation : Done')
 sys.stdout.flush()
 
 recon_vol = _mask_reconVol(recon_vol)
 
 recon_vol_sym = np.zeros((recon_vol.shape))
 recon_vol_scaled = np.zeros((recon_vol.shape))
-for i in range(len(recon_vol)//BATCH_SIZE):
-    recon_vol_sym[i*BATCH_SIZE:(i+1)*BATCH_SIZE] = ico_symm(torch.Tensor(recon_vol[i*BATCH_SIZE:(i+1)*BATCH_SIZE]).to(device)).cpu().numpy()
+for i in range(len(mu)//BATCH_SIZE):
+    
+    batch_recon_vol = recon_vol[i*BATCH_SIZE:(i+1)*BATCH_SIZE]
+    for j in range(len(batch_recon_vol)):
+            if ICO_SYMMETRIZATION:
+                recon_vol_sym[i*BATCH_SIZE:(i+1)*BATCH_SIZE] = ico_symm(torch.Tensor(recon_vol[i*BATCH_SIZE:(i+1)*BATCH_SIZE]).to(device)).cpu().numpy()
+            else:
+                recon_vol_sym[i*BATCH_SIZE + j] = friedel_symm(torch.Tensor(batch_recon_vol[j]).to(device)).cpu().numpy()
+
     recon_vol_scaled[i*BATCH_SIZE:(i+1)*BATCH_SIZE] = _scale_reconVol(recon_vol_sym[i*BATCH_SIZE:(i+1)*BATCH_SIZE])
     recon_vol_scaled[i*BATCH_SIZE:(i+1)*BATCH_SIZE] = _mask_reconVol(recon_vol_scaled[i*BATCH_SIZE:(i+1)*BATCH_SIZE])
-    print('which batch:',i+1)
+    sys.stderr.write('\rVolume Scaled, Batch %d/%d: '%(i+1, (len(mu)//BATCH_SIZE)))
     sys.stdout.flush()
-print('Symmetrization Done')
+print('Volume Scale : Done')
 sys.stdout.flush()
-
 
 
 recon_vol_bgsbt = np.zeros((recon_vol_scaled.shape))
 for i in range(len(recon_vol_scaled)):
-    print('which vol done:', i+1)
+    recon_vol_bgsbt[i] = bg_subtract(recon_vol_scaled[i], bgrad=8.)
+    sys.stderr.write('\rBackground Subtracted Volume: %d/%d: '%(i+1, len(recon_vol_scaled)))
     sys.stdout.flush()
-    recon_vol_bgsbt[i] = bg_subtract(recon_vol_scaled[i],bgrad=8.)
 
-print('Background Subtracted')
+print('Background Subtracted : Done')
 sys.stdout.flush()
 
-with h5py.File('/u/mallabhi/StrucNN/ms2vae/output/volumes_vae_l2_01_d.h5', 'w') as f:
-     f['recon_vol'] = recon_vol_sym[:,53:214,53:214,53:214]
-     f['recon_vol_scaled'] = recon_vol_scaled[:,53:214,53:214,53:214]
-     f['recon_vol_bgsbt'] = recon_vol_bgsbt[:,53:214,53:214,53:214]
+with h5py.File(VOLUMES_FILE, 'w') as f:
+     f['recon_vol'] = recon_vol_sym
+     f['recon_vol_scaled'] = recon_vol_scaled
+     f['recon_vol_bgsbt'] = recon_vol_bgsbt
+     f['recon_vol_crop'] = recon_vol_sym[:,53:214,53:214,53:214]
+     f['recon_vol_scaled_crop'] = recon_vol_scaled[:,53:214,53:214,53:214]
+     f['recon_vol_bgsbt_crop'] = recon_vol_bgsbt[:,53:214,53:214,53:214]
 
-#for l in range(len(coords)):
-#    with mrcfile.new('/u/mallabhi/StrucNN/ms2vae/output/volumes/vol_bgsubt_vae_25_2_b_%.3d.ccp4'%l, overwrite=True) as f:
-#         f.set_data(recon_vol_bgsbt[l,53:214,53:214,53:214].astype('f4'))
 
 print('Volume Saved')
 sys.stderr.flush()
+
 
