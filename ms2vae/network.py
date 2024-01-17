@@ -75,5 +75,5 @@ class VAE(nn.Module):
 
     def forward(self, x, orientation):
         z, mu, logvar = self.encoder(x, orientation)
-        return self.decoder(z), mu, logvar
+        return self.decoder(z), z, mu, logvar
 

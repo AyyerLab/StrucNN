@@ -13,11 +13,14 @@ def ave_fun(q, a,b,c):
                         of all 2D-Intensities in datatset'''
     return a*q**(-b) + c
 
-def load_data():
+def load_data(data_file, orientation_file, num_samples):
     '''Load object's size, 2D Intensity avgs. and corresponding orientations, FULL DATASET'''
-    with h5py.File('/u/mallabhi/StrucNN/data/MS2_manual_sel.h5', 'r') as f:
-        intens = f['intens'][:]
-        orientation  = f['orientation'][:]
+    with h5py.File(data_file, 'r') as f:
+        intens = f['intens'][:num_samples]
+        #orientation  = f['orientation'][:]
+    with h5py.File(orientation_file, 'r') as f:
+        orientation = f['coors'][:num_samples]
+
 
     orien_new = np.zeros((len(orientation), 4))
     orien_new[:,0] = orientation[:,0]
@@ -48,6 +51,7 @@ def load_data():
 
     norm_intens = intens_m/ave_2d
     norm_intens = mask_circle(norm_intens)
+    #norm_intens[np.isnan(norm_intens)] = 1e-20
     input_intens = norm_intens/np.max(norm_intens) * 0.99
     input_intens = sample_down_intens(input_intens)
 
@@ -95,9 +99,9 @@ def sample_down_plane(input_plane):
     return interpf(x_new, y_new)
     
 
-def get_detector():
+def get_detector(detector_file):
     ''''Get Detector Pixel Coordinates'''
-    with h5py.File('/u/mallabhi/StrucNN/data/det_vae.h5', 'r') as f:
+    with h5py.File(detector_file, 'r') as f:
         qx1 = f['qx'][:].reshape(503, 503)
         qy1 = f['qy'][:].reshape(503, 503)
         qz1 = f['qz'][:].reshape(503, 503)
