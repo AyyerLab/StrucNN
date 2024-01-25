@@ -12,7 +12,8 @@ from network import VAE
 from preprocessing import load_data
 from preprocessing import get_detector
 from auxiliary_functions import *
-from estimate_best_orientation import LocalCCOrinetationOptimizer as LCC
+#####from estimate_best_orientation import LocalCCOrinetationOptimizer as LCC
+from estimate_best_orientation_quat import LocalCCOrinetationOptimizer as LCC
 
 import os
 import sys
@@ -22,9 +23,12 @@ from random import randint
 from sklearn.utils import shuffle 
 
 import configparser
+import logging
+
 
 config = configparser.ConfigParser()
 config.read('config.ini')
+
 
 NUM_SAMPLES = int(config['Hyperparameters']['NUM_SAMPLES'])
 BETA = float(config['Hyperparameters']['BETA'])
@@ -37,6 +41,7 @@ LOAD_MODEL = config['Hyperparameters'].getboolean('LOAD_MODEL')
 SAVE_AT_EPOCH = int(config['Hyperparameters']['SAVE_AT_EPOCH'])
 ICO_SYMMETRIZATION = config['Hyperparameters'].getboolean('ICO_SYMMETRIZATION')
 OPTIMIZE_ORIENTATIONS = config['Hyperparameters'].getboolean('OPTIMIZE_ORIENTATIONS')
+SIGMA_KERNEL = float(config['Hyperparameters']['SIGMA_KERNEL'])
 
 DATA_FILE = config['Files']['DATA_FILE']
 ORIENTATION_FILE = config['Files']['ORIENTATION_FILE']
@@ -45,7 +50,17 @@ START_MODEL_FILE = config['Files']['START_MODEL_FILE']
 OUTPUT_FILE = config['Files']['OUTPUT_FILE']
 VAE_MODEL_FILE = config['Files']['VAE_MODEL_FILE']
 
-#####torch.manual_seed(42)
+LOG_FILENAME = config['Files']['LOG_FILE']
+logging.basicConfig(filename=LOG_FILENAME, level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+logging.info("Hyperparameters:")
+for key, value in config['Hyperparameters'].items():
+    logging.info(f"{key}: {value}")
+
+logging.info("\nFile paths:")
+for key, value in config['Files'].items():
+    logging.info(f"{key}: {value}")
+
 
 '''Loading Data and Detector File'''
 input_intens, orientation = load_data(DATA_FILE, ORIENTATION_FILE, NUM_SAMPLES)
@@ -65,6 +80,8 @@ device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 if LOAD_MODEL:
     model.load_state_dict(torch.load(START_MODEL_FILE, map_location=device))
     print('Model loaded')
+else:
+    torch.manual_seed(42)
 
 '''Optimizaer for NN'''
 optimizer = torch.optim.Adam(model.parameters(), LR, weight_decay=WEIGHT_DECAY)
@@ -76,19 +93,18 @@ sys.stdout.flush()
 
 
 slices_s = slice_planes(orientation, input_intens.shape[-1], DATA_POINTS, qx_d, qy_d, qz_d, device)
-orient_optimizer = LCC(0.05, 256, qx_d, qy_d, qz_d)
+orient_optimizer = LCC(SIGMA_KERNEL, 256, qx_d, qy_d, qz_d)
 
 
 def trainNN(epoch, input_intens, orientation, beta):
     epochloss = 0
     bseloss = 0
     kldloss=0
-    z_ = np.zeros((len(orientation),LATENT_DIMS))
+    true_intens = np.zeros((len(orientation), input_intens.shape[1], input_intens.shape[1]))
+    recon_vol = np.zeros((len(orientation), 267,267,267))
     mu_ = np.zeros((len(orientation), LATENT_DIMS))
     logvar_ = np.zeros((len(orientation), LATENT_DIMS))
-    true_intens = np.zeros((len(orientation), input_intens.shape[1], input_intens.shape[1]))
     pred_intens = np.zeros((len(orientation), input_intens.shape[1], input_intens.shape[1]))
-    recon_vol = np.zeros((len(orientation), 267,267,267))
     idx=0
     for i in range(len(orientation)//BATCH_SIZE):
         intens_batch = input_intens[i*BATCH_SIZE:(i+1)*BATCH_SIZE]
@@ -108,10 +124,9 @@ def trainNN(epoch, input_intens, orientation, beta):
         if epoch % SAVE_AT_EPOCH == 0:
             true_intens[idx:idx+BATCH_SIZE,:,:] = images.detach().cpu().clone().numpy().reshape(BATCH_SIZE, input_intens.shape[1], input_intens.shape[1])
             pred_intens[idx:idx+BATCH_SIZE,:,:] = recon_2D_x.detach().cpu().clone().numpy().reshape(BATCH_SIZE, input_intens.shape[1], input_intens.shape[1])
-            z_[idx:idx+BATCH_SIZE,:] = z.detach().cpu().numpy()
+            recon_vol[idx:idx+BATCH_SIZE, :,:,:] = output.detach().cpu().clone().numpy().reshape(BATCH_SIZE, 267,267,267)
             mu_[idx:idx+BATCH_SIZE,:] = mu.detach().cpu().numpy()
             logvar_[idx:idx+BATCH_SIZE,:] = logvar.detach().cpu().numpy()
-            recon_vol[idx:idx+BATCH_SIZE, :,:,:] = output.detach().cpu().clone().numpy().reshape(BATCH_SIZE, 267,267,267)
             idx += BATCH_SIZE
 
 
@@ -119,7 +134,7 @@ def trainNN(epoch, input_intens, orientation, beta):
         loss.backward()
         optimizer.step()
 
-    return true_intens, pred_intens, recon_vol, z_, mu_, logvar_, epochloss/len(orientation), bseloss/len(orientation), kldloss/len(orientation)
+    return true_intens, pred_intens, recon_vol, mu_, logvar_, epochloss/len(orientation), bseloss/len(orientation), kldloss/len(orientation)
 
 
 quats = ne.math.sym_group_quat(sym_type='IL', qs=quat.quaternion(2**-0.5, 0, 2**-0.5, 0))
@@ -140,6 +155,7 @@ def quaternion_multiply(quaternion1, quaternion0):
                      -x1 * z0 + y1 * w0 + z1 * x0 + w1 * y0,
                      x1 * y0 - y1 * x0 + z1 * w0 + w1 * z0], dtype=np.float64)
 
+
 training_loss = []
 bse_loss = []
 kld_loss = []
@@ -151,13 +167,13 @@ for epoch in np.arange(N_EPOCHS)+1:
     else:
         orientation_n = orientation
 
-    true_intens, pred_intens, recon_vol, z, mu, logvar, loss, bseloss, kldloss = trainNN(epoch, input_intens, orientation_n, BETA)
+    true_intens, pred_intens, recon_vol, mu, logvar, loss, bseloss, kldloss = trainNN(epoch, input_intens, orientation_n, BETA)
 
     if epoch % SAVE_AT_EPOCH == 0:
         if OPTIMIZE_ORIENTATIONS:
             for q in range(len(orientation_n)):
                 q0s_oris = quat.quaternion(*orientation_n[q])
-                updated_orientation = orient_optimizer(true_intens[q], recon_vol[q], q0s_oris)
+                updated_orientation = orient_optimizer(pred_intens[q], recon_vol[q], q0s_oris)
                 updated_orientation  = np.array([updated_orientation.w, updated_orientation.x, updated_orientation.y, updated_orientation.z])
                 orientation_n[q] = updated_orientation
 
@@ -178,15 +194,12 @@ for epoch in np.arange(N_EPOCHS)+1:
         torch.save(model.module.state_dict(), MODEL_FNAME)
         OUTPUT_FNAME = f'{OUTPUT_FILE}_epoch{epoch}.h5'
         with h5py.File(OUTPUT_FNAME, "w") as f:
-                        f['true_intens'] = true_intens
                         f['pred_intens'] = pred_intens
                         f['loss'] = training_loss
                         f['bseloss'] = bse_loss
                         f['kldloss'] = kld_loss
-                        f['z'] = z
                         f['mu'] = mu
                         f['logvar'] = logvar
-                        f['decoder_vol'] = recon_vol
                         f['coors'] = orientation_n
 
 sys.stderr.write('\n')
