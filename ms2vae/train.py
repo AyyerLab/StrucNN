@@ -194,13 +194,13 @@ for epoch in np.arange(N_EPOCHS)+1:
         torch.save(model.module.state_dict(), MODEL_FNAME)
         OUTPUT_FNAME = f'{OUTPUT_FILE}_epoch{epoch}.h5'
         with h5py.File(OUTPUT_FNAME, "w") as f:
-                        f['pred_intens'] = pred_intens
+                       # f['pred_intens'] = pred_intens
                         f['loss'] = training_loss
                         f['bseloss'] = bse_loss
                         f['kldloss'] = kld_loss
-                        f['mu'] = mu
-                        f['logvar'] = logvar
-                        f['coors'] = orientation_n
+                       # f['mu'] = mu
+                       # f['logvar'] = logvar
+                       # f['coors'] = orientation_n
 
 sys.stderr.write('\n')
 sys.stderr.flush()
