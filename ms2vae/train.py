@@ -106,6 +106,7 @@ def trainNN(epoch, input_intens, orientation, beta):
     logvar_ = np.zeros((len(orientation), LATENT_DIMS))
     pred_intens = np.zeros((len(orientation), input_intens.shape[1], input_intens.shape[1]))
     idx=0
+    slices_s = slice_planes(orientation, input_intens.shape[-1], DATA_POINTS, qx_d, qy_d, qz_d, device)
     for i in range(len(orientation)//BATCH_SIZE):
         intens_batch = input_intens[i*BATCH_SIZE:(i+1)*BATCH_SIZE]
         images = torch.from_numpy(intens_batch).view(BATCH_SIZE, 1, input_intens.shape[1], input_intens.shape[1])
@@ -194,13 +195,13 @@ for epoch in np.arange(N_EPOCHS)+1:
         torch.save(model.module.state_dict(), MODEL_FNAME)
         OUTPUT_FNAME = f'{OUTPUT_FILE}_epoch{epoch}.h5'
         with h5py.File(OUTPUT_FNAME, "w") as f:
-                       # f['pred_intens'] = pred_intens
+                        f['pred_intens'] = pred_intens
                         f['loss'] = training_loss
                         f['bseloss'] = bse_loss
                         f['kldloss'] = kld_loss
-                       # f['mu'] = mu
-                       # f['logvar'] = logvar
-                       # f['coors'] = orientation_n
+                        f['mu'] = mu
+                        f['logvar'] = logvar
+                        f['coors'] = orientation_n
 
 sys.stderr.write('\n')
 sys.stderr.flush()
