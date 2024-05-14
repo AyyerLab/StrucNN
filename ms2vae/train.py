@@ -81,9 +81,9 @@ if LOAD_MODEL:
     model.load_state_dict(torch.load(START_MODEL_FILE, map_location=device))
     print('Model loaded')
 else:
-    #torch.manual_seed(42)
+    torch.manual_seed(42)
     #torch.manual_seed(61)
-    torch.manual_seed(99)
+    #torch.manual_seed(99)
 
 '''Optimizaer for NN'''
 optimizer = torch.optim.Adam(model.parameters(), LR, weight_decay=WEIGHT_DECAY)
